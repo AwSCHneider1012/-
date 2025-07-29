@@ -1,0 +1,177 @@
+import requests
+import time
+import random
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("course_grabbing.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("CourseGrabber")
+
+class CourseGrabber:
+    def __init__(self, cookie, base_url, course_ids, max_retries=30000, delay_range=(5, 10)):
+        """
+        初始化多课程抢课器
+        :param cookie: 登录后的cookie
+        :param base_url: 抢课基础URL（不含electLessonIds参数）
+        :param course_ids: 课程ID列表
+        :param max_retries: 每门课程最大重试次数
+        :param delay_range: 每次请求的随机延迟范围(秒)
+        """
+        self.cookie = cookie
+        self.base_url = base_url
+        self.course_ids = course_ids
+        self.max_retries = max_retries
+        self.delay_range = delay_range
+        self.session = requests.Session()
+        self.success_courses = []
+        self.failed_courses = []
+        
+        # 失败原因匹配规则
+        self.error_rules = [
+            ("没有足够的名额", "课程名额不足"),
+            ("不在选课时间范围内", "当前不在选课时间段"),
+            ("先修课程未通过", "先修课程要求未满足"),
+            ("该课程已选过", "课程已选，无法重复选择"),
+            ("选课优先级不足", "选课优先级低于其他学生"),
+            ("session失效", "登录会话已过期，请重新获取Cookie"),
+            ("403 Forbidden", "账号权限不足或请求被禁止"),
+            ("人数已满", "课程人数已满")
+        ]
+
+    def set_cookies(self):
+        """设置请求cookie"""
+        cookie_dict = {}
+        for item in self.cookie.split('; '):
+            key, value = item.split('=', 1)
+            cookie_dict[key] = value
+        self.session.cookies.update(cookie_dict)
+        logger.info("Cookie已设置")
+        
+    def generate_random_delay(self):
+        """生成随机延迟，避免请求过于频繁"""
+        return random.uniform(*self.delay_range)
+    
+    def parse_error_reason(self, response_text):
+        """解析失败原因"""
+        for error_key, error_msg in self.error_rules:
+            if error_key in response_text:
+                return error_msg
+        return "未知错误，响应内容: " + response_text[:100] + "..."
+    
+    def grab_single_course(self, course_id):
+        """抢单门课程"""
+        course_url = self.base_url.replace("electLessonIds=394298", f"electLessonIds={course_id}")
+        logger.info(f"开始抢课程ID: {course_id}")
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.6',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Referer': 'https://eams.sufe.edu.cn/eams/stdElectCourse!defaultPage.action?electionProfile.id=10587',
+            'Connection': 'keep-alive'
+        }
+        
+        retries = 0
+        success = False
+        
+        while retries < self.max_retries and not success:
+            try:
+                # 生成随机延迟
+                delay = self.generate_random_delay()
+                retries += 1
+                
+                logger.info(f"课程{course_id}第{retries}次尝试，延迟{delay:.2f}秒")
+                time.sleep(delay)
+                
+                # 发送抢课请求
+                response = self.session.get(
+                    course_url,
+                    headers=headers,
+                    timeout=8
+                )
+                
+                if response.status_code == 200:
+                    if "成功" in response.text or "success" in response.text.lower():
+                        success = True
+                        logger.info(f"【课程{course_id}抢课成功！】")
+                    else:
+                        error_reason = self.parse_error_reason(response.text)
+                        logger.warning(f"课程{course_id}抢课失败，原因: {error_reason}")
+                else:
+                    logger.error(f"课程{course_id}请求失败，状态码: {response.status_code}")
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"课程{course_id}请求异常: {str(e)}")
+                time.sleep(2)
+            except Exception as e:
+                logger.error(f"课程{course_id}发生错误: {str(e)}")
+                time.sleep(3)
+        
+        if success:
+            self.success_courses.append(course_id)
+        else:
+            self.failed_courses.append(course_id)
+            
+        return success
+    
+    def grab_all_courses(self, concurrent=True, max_workers=3):
+        """
+        抢所有课程
+        :param concurrent: 是否并发抢课
+        :param max_workers: 并发线程数
+        """
+        self.set_cookies()
+        
+        if concurrent:
+            # 并发抢课
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(self.grab_single_course, self.course_ids))
+        else:
+            # 顺序抢课
+            for course_id in self.course_ids:
+                self.grab_single_course(course_id)
+        
+        # 输出结果
+        logger.info(f"抢课完成！成功: {len(self.success_courses)}门，失败: {len(self.failed_courses)}门")
+        if self.success_courses:
+            logger.info(f"成功的课程ID: {', '.join(map(str, self.success_courses))}")
+        if self.failed_courses:
+            logger.info(f"失败的课程ID: {', '.join(map(str, self.failed_courses))}")
+
+def main():
+    # 配置信息
+    cookie = "semester.id=3729; JSESSIONID=0B4FE664FCE2F7FE23B605E7968D1576; SF_cookie_75=36210081"
+    base_url = "https://eams.sufe.edu.cn/eams/stdElectCourse!batchOperator.action?profileId=10587&electLessonIds=395805&withdrawLessonIds=&v=1751361725361&_=1751361725364"
+    
+    # 要抢的课程ID列表
+    course_ids = [
+        395805,  # 学术论文
+    ]
+    
+    logger.info(f"开始多课程抢课程序，共{len(course_ids)}门课程")
+    
+    # 创建抢课器实例
+    grabber = CourseGrabber(
+        cookie=cookie,
+        base_url=base_url,
+        course_ids=course_ids,
+        max_retries=30000,  # 每门课程最大重试次数
+        delay_range=(5, 10)  # 随机延迟范围（秒）
+    )
+    
+    # 执行抢课（默认顺序抢课，可改为concurrent=True启用并发）
+    grabber.grab_all_courses(concurrent=True, max_workers=3)
+    
+    logger.info("多课程抢课程序结束")
+
+if __name__ == "__main__":
+    main()
