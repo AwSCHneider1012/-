@@ -1,3 +1,4 @@
+
 import requests
 import time
 import random
@@ -64,19 +65,19 @@ class CourseGrabber:
         for error_key, error_msg in self.error_rules:
             if error_key in response_text:
                 return error_msg
-        return "未知错误，响应内容: " + response_text[:100] + "..."
+        return "未知错误，响应内容: " + response_text + "..."
     
     def grab_single_course(self, course_id):
         """抢单门课程"""
-        course_url = self.base_url.replace("electLessonIds=394298", f"electLessonIds={course_id}")
+        course_url = self.base_url.replace("electLessonIds=412247", f"electLessonIds={course_id}")
         logger.info(f"开始抢课程ID: {course_id}")
         
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
             'Accept': 'application/json, text/javascript, */*; q=0.01',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.6',
             'X-Requested-With': 'XMLHttpRequest',
-            'Referer': 'https://eams.sufe.edu.cn/eams/stdElectCourse!defaultPage.action?electionProfile.id=10587',
+            'Referer': 'https://eams.sufe.edu.cn/eams/stdElectCourse!defaultPage.action?electionProfile.id=10985',
             'Connection': 'keep-alive'
         }
         
@@ -123,7 +124,7 @@ class CourseGrabber:
             
         return success
     
-    def grab_all_courses(self, concurrent=True, max_workers=3):
+    def grab_all_courses(self, concurrent=False, max_workers=3):
         """
         抢所有课程
         :param concurrent: 是否并发抢课
@@ -149,12 +150,12 @@ class CourseGrabber:
 
 def main():
     # 配置信息
-    cookie = "semester.id=3729; JSESSIONID=0B4FE664FCE2F7FE23B605E7968D1576; SF_cookie_75=36210081"
-    base_url = "https://eams.sufe.edu.cn/eams/stdElectCourse!batchOperator.action?profileId=10587&electLessonIds=395805&withdrawLessonIds=&v=1751361725361&_=1751361725364"
+    cookie = "semester.id=3628; JSESSIONID=C5AC43740A73A8A8528583D664737CF3; SF_cookie_75=26978239"
+    base_url = "https://eams.sufe.edu.cn/eams/stdElectCourse!batchOperator.action?profileId=10985&electLessonIds=412247&withdrawLessonIds=&v=1766984530031&_=1766984530034"
     
     # 要抢的课程ID列表
     course_ids = [
-        395805,  # 学术论文
+        412729, 
     ]
     
     logger.info(f"开始多课程抢课程序，共{len(course_ids)}门课程")
@@ -165,11 +166,11 @@ def main():
         base_url=base_url,
         course_ids=course_ids,
         max_retries=30000,  # 每门课程最大重试次数
-        delay_range=(5, 10)  # 随机延迟范围（秒）
+        delay_range=(5, 8)  # 随机延迟范围（秒）
     )
     
     # 执行抢课（默认顺序抢课，可改为concurrent=True启用并发）
-    grabber.grab_all_courses(concurrent=True, max_workers=3)
+    grabber.grab_all_courses(concurrent=False, max_workers=3)
     
     logger.info("多课程抢课程序结束")
 
