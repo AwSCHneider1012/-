@@ -1,4 +1,5 @@
 
+import re
 import requests
 import time
 import random
@@ -34,6 +35,11 @@ class CourseGrabber:
         self.session = requests.Session()
         self.success_courses = []
         self.failed_courses = []
+
+        # 从base_url中提取profileId，拼出选课页面地址
+        profile_id_match = re.search(r'profileId=(\d+)', base_url)
+        profile_id = profile_id_match.group(1) if profile_id_match else ''
+        self.election_page_url = f"https://eams.sufe.edu.cn/eams/stdElectCourse!defaultPage.action?electionProfile.id={profile_id}"
         
         # 失败原因匹配规则
         self.error_rules = [
@@ -44,8 +50,26 @@ class CourseGrabber:
             ("选课优先级不足", "选课优先级低于其他学生"),
             ("session失效", "登录会话已过期，请重新获取Cookie"),
             ("403 Forbidden", "账号权限不足或请求被禁止"),
-            ("人数已满", "课程人数已满")
+            ("人数已满", "课程人数已满"),
+            ("请重新进入选课页面", "会话状态未建立，需要先访问选课页面")
         ]
+
+    def visit_election_page(self):
+        """访问选课页面，建立/刷新服务器端的选课会话状态"""
+        try:
+            self.session.get(
+                self.election_page_url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.6',
+                    'Connection': 'keep-alive'
+                },
+                timeout=8
+            )
+            logger.info("已访问选课页面，会话状态已刷新")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"访问选课页面失败: {str(e)}")
 
     def set_cookies(self):
         """设置请求cookie"""
@@ -74,10 +98,10 @@ class CourseGrabber:
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
-            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept': 'text/html, */*; q=0.01',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.6',
             'X-Requested-With': 'XMLHttpRequest',
-            'Referer': 'https://eams.sufe.edu.cn/eams/stdElectCourse!defaultPage.action?electionProfile.id=10985',
+            'Referer': self.election_page_url,
             'Connection': 'keep-alive'
         }
         
@@ -101,9 +125,12 @@ class CourseGrabber:
                 )
                 
                 if response.status_code == 200:
-                    if "成功" in response.text or "success" in response.text.lower():
+                    if "选课成功" in response.text:
                         success = True
                         logger.info(f"【课程{course_id}抢课成功！】")
+                    elif "请重新进入选课页面" in response.text:
+                        logger.warning(f"课程{course_id}会话状态失效，重新访问选课页面后继续重试")
+                        self.visit_election_page()
                     else:
                         error_reason = self.parse_error_reason(response.text)
                         logger.warning(f"课程{course_id}抢课失败，原因: {error_reason}")
@@ -131,7 +158,8 @@ class CourseGrabber:
         :param max_workers: 并发线程数
         """
         self.set_cookies()
-        
+        self.visit_election_page()
+
         if concurrent:
             # 并发抢课
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -150,14 +178,14 @@ class CourseGrabber:
 
 def main():
     # 配置信息
-    cookie = "semester.id=3628; JSESSIONID=C5AC43740A73A8A8528583D664737CF3; SF_cookie_75=26978239"
-    base_url = "https://eams.sufe.edu.cn/eams/stdElectCourse!batchOperator.action?profileId=10985&electLessonIds=412247&withdrawLessonIds=&v=1766984530031&_=1766984530034"
+    cookie = "semester.id=0000; JSESSIONID=7FBB7390E2735A437005C2700005CF4B; SF_cookie_75=26900039"
+    base_url = "https://eams.sufe.edu.cn/eams/stdElectCourse!batchOperator.action?profileId=000&electLessonIds=412247&withdrawLessonIds=&v=1766984530031&_=1766984530034"
     
     # 要抢的课程ID列表
     course_ids = [
-        412729, 
+        423000, 
     ]
-    
+  
     logger.info(f"开始多课程抢课程序，共{len(course_ids)}门课程")
     
     # 创建抢课器实例
